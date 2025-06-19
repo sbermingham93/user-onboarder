@@ -1,11 +1,12 @@
 import React from "react";
+import { AiOnboardingForm } from "./components/AiOnboardingForm";
 
 const App: React.FC = () => {
 
   
   return (
     <div>
-      <h1 className="text-2xl font-bold text-center">AI Voice Chat</h1>
+      <AiOnboardingForm />
     </div>
   );
 };
