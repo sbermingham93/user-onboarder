@@ -1,0 +1,16 @@
+
+// initial thoughts
+// get it working with text inputs first (also will be used if we are having issues with the audio)
+// add the audio, so text can be read, and input taken from the mic of the machine
+// ui - top - header, 2. what step they are on, 3. input - which is either a text box, or audio input, 4. chat messages
+
+// afterwards we add ai for each step (again may need to fall back to previous solution if issue with AI api)
+
+// tests for hooks, tests for api endpoint, e2e test for text, audio, ai
+
+// make the UI look nicer
+
+
+// KNOWN BUGS
+// first prompt is not being read - not allowed error from the utterance.speak
+// simple text parsing can easily miss the keywords

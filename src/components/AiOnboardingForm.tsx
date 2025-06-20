@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ONBOARDING_GOALS from '../config/onboardingGoals.json'
 import { AlertCircle, CheckCircle, Download, Mic, MicOff, Volume2 } from 'lucide-react';
 import { CompletionStatus, ConversationInput, ConversationSpeaker, type IConversationEntry, type IOnboardingData, type IOnboardingGoal, type IOnboardingReport, type IValidationResponse } from '../types/types';
@@ -6,27 +6,11 @@ import { validateCompanyIndustry } from '../api/validation';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { useLiveTranscription } from '../hooks/useLiveTranscription';
 
-
-// initial thoughts
-// get it working with text inputs first (also will be used if we are having issues with the audio)
-// add the audio, so text can be read, and input taken from the mic of the machine
-// ui - top - header, 2. what step they are on, 3. input - which is either a text box, or audio input, 4. chat messages
-
-// afterwards we add ai for each step (again may need to fall back to previous solution if issue with AI api)
-
-// tests for hooks, tests for api endpoint, e2e test for text, audio, ai
-
-// make the UI look nicer
-
-
-// KNOWN BUGS
-// first prompt is not being read - not allowed error from the utterance.speak
-// simple text parsing can easily miss the keywords
-
 export const AiOnboardingForm = () => {
     // STATE VARIABLES
     const [isProcessing, setIsProcessing] = useState(false) // used for api calls, creating report etc
     const [isComplete, setIsComplete] = useState(false) // is the process complete
+    const [isInitializing, setIsInitializing] = useState(false);
 
     const [currentStep, setCurrentStep] = useState(0)
     const [textInput, setTextInput] = useState("") // text input in case issue with audio
@@ -39,6 +23,11 @@ export const AiOnboardingForm = () => {
     const onboardingDataRef = useRef<IOnboardingData>({})
     const conversationRef = useRef<IConversationEntry[]>([])
     const conversationElementRef = useRef(null)
+
+    // MEMOS
+    const currentStepMeta = useMemo(() => {
+        return ONBOARDING_GOALS[currentStep];
+    }, [currentStep]);
 
     // HOOKS
     const { isSpeaking, cancel, isEnabled, speak } = useTextToSpeech()
@@ -54,16 +43,16 @@ export const AiOnboardingForm = () => {
 
 
     // FUNCTIONS
-    const addConversationEntry = (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
+    const addConversationEntry = useCallback((speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
         setConversation(prev => [...prev, {
             timestamp: date,
             speaker: speaker,
             text: textReceived,
             input: inputType
-        }])
-    }
+        }]);
+    }, []);
 
-    const speakAndAddConversationEntry = async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
+    const speakAndAddConversationEntry = useCallback(async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
         // add conversation entry
         addConversationEntry(speaker, inputType, textReceived, date)
 
@@ -77,10 +66,10 @@ export const AiOnboardingForm = () => {
                 })
             }
         }
-    }
+    }, [addConversationEntry, speak])
 
     // simple method to pick out data of interest based on the step they are on
-    const extractDataFromResponse = (response: string, dataField: string): Partial<IOnboardingData> => {
+    const extractDataFromResponse = useCallback((response: string, dataField: string): Partial<IOnboardingData> => {
         const data: any = {};
 
         switch (dataField) {
@@ -113,42 +102,33 @@ export const AiOnboardingForm = () => {
         }
 
         return data;
-    };
+    }, [])
 
-    const performIndustryCheckIfNeeded = async (stepMeta: IOnboardingGoal) => {
+    const performIndustryCheckIfNeeded = useCallback(async (stepMeta: IOnboardingGoal) => {
         if (stepMeta != null && stepMeta.id === 'industry' && onboardingDataRef.current.companyName) {
             try {
                 setIsProcessing(true)
                 const validation = await validateCompanyIndustry(onboardingDataRef.current.companyName);
                 setValidationResult(validation);
 
+                setIsProcessing(false);
+
                 const validationMessage = validation.industryMatch
                     ? "Great! I've confirmed that your company is in the food and beverage industry."
                     : "I see. While your company isn't primarily in food and beverage, we can still help you with your research needs.";
 
-                addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, validationMessage, new Date())
+                await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, validationMessage, new Date())
             } catch (err) {
                 console.warn('Validation failed, but continuing with onboarding.');
             } finally {
                 setIsProcessing(false)
             }
         }
-    }
+    }, [speakAndAddConversationEntry])
 
-    // todo - make this method less horrible
-    const handleTextReceived = async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string) => {
-        // add a row to the conversation
-        addConversationEntry(speaker, inputType, textReceived, new Date())
-
-        // nothing more to do if its the agent
-        if (speaker == ConversationSpeaker.AGENT) {
-            return
-        }
-
-        const stepMeta = ONBOARDING_GOALS[currentStep]
-
+    const processCurrentStep = useCallback(async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string) => {
         // we want to extract any information of interest here
-        const extracted = extractDataFromResponse(textReceived, stepMeta.dataField)
+        const extracted = extractDataFromResponse(textReceived, currentStepMeta.dataField)
         const newOnboardingData = { ...onboardingDataRef.current, ...extracted }
 
         onboardingDataRef.current = newOnboardingData
@@ -165,31 +145,10 @@ export const AiOnboardingForm = () => {
         });
 
         await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, followUp, new Date())
-
-        // if we are not on the last step, increment
-        const nextStep = currentStep + 1
-        const isFinalStep = nextStep >= ONBOARDING_GOALS.length
-
-        if (isFinalStep == true) {
-            completeOnboarding()
-        } else {
-            // ADD CHECK ON COMPANY NAME
-            await performIndustryCheckIfNeeded(stepMeta)
-
-            // increment the step, show the prompt
-            setCurrentStep(nextStep)
-            const prompt = ONBOARDING_GOALS[nextStep].prompt.replace(/\{(\w+)\}/g, (match, key) => {
-                return (onboardingDataRef.current as any)[key] || match;
-            });
-
-            // add the prompt too
-            await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, prompt, new Date())
-        }
-
-    }
+    }, [currentStepMeta, speakAndAddConversationEntry, extractDataFromResponse])
 
     // Complete the onboarding process - create report, add message
-    const completeOnboarding = async () => {
+    const completeOnboarding = useCallback(async () => {
         setIsComplete(true);
 
         const finalReport: IOnboardingReport = {
@@ -205,29 +164,73 @@ export const AiOnboardingForm = () => {
 
         // todo write report to DB
 
-        const completionMessage = `Perfect! I've generated your onboarding report. You can review all the information we discussed and download it for your records. Thank you for completing the onboarding process, ${onboardingData?.userName}!`;
+        const completionMessage = `Perfect! I've generated your onboarding report. You can review all the information we discussed and download it for your records. Thank you for completing the onboarding process ${onboardingData?.userName}!`;
 
-        // addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, completionMessage, new Date());
         await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, completionMessage, new Date())
-    };
+    }, [onboardingData, conversation, validationResult, speakAndAddConversationEntry])
 
-    const downloadReport = () => {
+    const processNextStep = useCallback(async () => {
+        // if we are not on the last step, increment
+        const nextStep = currentStep + 1
+        const isFinalStep = nextStep >= ONBOARDING_GOALS.length
+
+        if (isFinalStep == true) {
+            completeOnboarding()
+        } else {
+            // ADD CHECK ON COMPANY NAME
+            await performIndustryCheckIfNeeded(currentStepMeta)
+
+            // increment the step
+            setCurrentStep(nextStep)
+
+            // add the prompt too
+            const prompt = ONBOARDING_GOALS[nextStep].prompt.replace(/\{(\w+)\}/g, (match, key) => {
+                return (onboardingDataRef.current as any)[key] || match;
+            });
+
+            await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, prompt, new Date())
+
+            // listen for next response
+            startListening()
+        }
+    }, [currentStep, completeOnboarding, performIndustryCheckIfNeeded, startListening, speakAndAddConversationEntry])
+
+    const handleTextReceived = useCallback(async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string) => {
+        // ... your existing logic
+        addConversationEntry(speaker, inputType, textReceived, new Date())
+
+        // nothing more to do if its the agent
+        if (speaker == ConversationSpeaker.AGENT) {
+            return
+        }
+
+        // process current step
+        await processCurrentStep(speaker, inputType, textReceived)
+
+        // process next step
+        await processNextStep()
+    }, [addConversationEntry, processCurrentStep, processNextStep]);
+
+    const downloadReport = useCallback(() => {
         if (!report) return;
 
+        // maybe we should snitise the values here
         const dataStr = JSON.stringify(report, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
 
+
+        const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
         const exportFileDefaultName = `onboarding-report-${report.id}.json`;
 
         const linkElement = document.createElement('a');
         linkElement.setAttribute('href', dataUri);
         linkElement.setAttribute('download', exportFileDefaultName);
         linkElement.click();
-    };
+    }, [report])
 
     // when we get text from the mic, we process it
     const previousInterimResultRef = useRef<string>(undefined)
 
+    // todo - improve with a callback in the hook
     useEffect(() => {
         if (interimTranscript == null || interimTranscript.length == 0) {
             if (previousInterimResultRef.current != null && previousInterimResultRef.current.length > 0) {
@@ -242,10 +245,13 @@ export const AiOnboardingForm = () => {
         }
     }, [interimTranscript])
 
-    // kick off the process with adding the first prompt
-    useEffect(() => {
-        async function speakFirstMessage() {
-            const prompt = ONBOARDING_GOALS[0].prompt
+    // kick off the process with adding the first prompt, reading it, and listen for reponse
+    const startOnboarding = useCallback(async () => {
+        setIsInitializing(true)
+
+        try {
+            const firstGoal = ONBOARDING_GOALS[0]
+            const prompt = firstGoal.prompt
 
             const initialConversation = [{
                 text: prompt,
@@ -256,18 +262,16 @@ export const AiOnboardingForm = () => {
             conversationRef.current = initialConversation
             setConversation(initialConversation)
 
-            try {
-                await speak(prompt)
-            } catch (err) {
-                console.warn('Issue with first message')
-            }
-        }
+            await speak(prompt)
 
-        // add the first step to the conversation
-        if (conversationRef.current.length == 0) {
-            speakFirstMessage()
+            // listen for response
+            startListening()
+        } catch (err) {
+            console.warn('Issue with first message')
+        } finally {
+            setIsInitializing(false)
         }
-    }, [])
+    }, [speak, startListening])
 
     // when conversation items are added, scroll to the bottom of the list
     useEffect(() => {
@@ -278,6 +282,53 @@ export const AiOnboardingForm = () => {
             });
         }
     }, [conversation]);
+
+    // Add cleanup on unmount
+    useEffect(() => {
+        return () => {
+            cancel(); // Cancel any ongoing speech
+            stopListening(); // Stop any ongoing listening
+        };
+    }, []);
+
+    // Memoize the conversation rendering to avoid re-renders
+    const conversationElements = useMemo(() => {
+        return conversation.map((entry, index) => (
+            <div key={`${entry.timestamp.getTime()}-${index}`} className={`mb-2 p-2 rounded ${entry.speaker === ConversationSpeaker.AGENT ? 'bg-blue-100 ml-4' : 'bg-green-100 mr-4'
+                }`}>
+                <div className="flex justify-between items-start">
+                    <span className={`font-medium ${entry.speaker === ConversationSpeaker.AGENT ? 'text-blue-800' : 'text-green-800'
+                        }`}>
+                        {entry.speaker === ConversationSpeaker.AGENT ? 'AI Agent' : 'You'}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                        {entry.timestamp.toLocaleTimeString()}
+                    </span>
+                </div>
+                <p className="text-gray-700 mt-1">{entry.text}</p>
+            </div>
+        ));
+    }, [conversation]);
+
+    const progressPercentage = useMemo(() => {
+        return ((currentStep + 1) / ONBOARDING_GOALS.length) * 100;
+    }, [currentStep]);
+
+    const showProgressPercentage = useMemo(() => {
+        return !isComplete && conversation.length > 0
+    }, [isComplete, conversation])
+
+    const showVoiceControls = useMemo(() => {
+        return !isComplete && !isInitializing && conversation.length > 0 && isSupported == true
+    }, [isComplete, isInitializing, conversation, isSupported])
+
+    const showStartButton = useMemo(() => {
+        return conversation.length == 0 || isInitializing == true 
+    }, [conversation, isInitializing])
+
+    const showTextFallback = useMemo(() => {
+        return !isComplete && isSupported == false
+    }, [isComplete, isSupported])
 
     // UI
     return (
@@ -292,16 +343,16 @@ export const AiOnboardingForm = () => {
             </div>
 
             {/* Progress Bar */}
-            {!isComplete && (
+            {showProgressPercentage ? (
                 <div className="mb-6">
                     <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
                             className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                            style={{ width: `${((currentStep + 1) / ONBOARDING_GOALS.length) * 100}%` }}
+                            style={{ width: `${progressPercentage}%` }}
                         ></div>
                     </div>
                 </div>
-            )}
+            ) : ''}
 
             {/* Status Indicators */}
             <div className="flex justify-center gap-4 mb-6">
@@ -330,12 +381,12 @@ export const AiOnboardingForm = () => {
             </div>
 
             {/* Voice Controls */}
-            {!isComplete && isSupported == true ? (
+            {showVoiceControls ? (
                 <div className="flex justify-center gap-4 mb-6">
                     <button
                         onClick={isListening ? stopListening : startListening}
                         disabled={isSpeaking || isProcessing}
-                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${isListening
+                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all cursor-pointer ${isListening
                             ? 'bg-red-500 text-white hover:bg-red-600'
                             : 'bg-green-500 text-white hover:bg-green-600'
                             } ${(isSpeaking || isProcessing) ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -346,8 +397,31 @@ export const AiOnboardingForm = () => {
                 </div>
             ) : ''}
 
+            {/* Start Process */}
+            {showStartButton ? (
+                <div className="flex justify-center gap-4 mb-6">
+                    <button
+                        onClick={startOnboarding}
+                        disabled={isInitializing}
+                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all cursor-pointer ${isInitializing
+                                ? 'bg-gray-400 cursor-not-allowed'
+                                : 'bg-green-500 hover:bg-green-600'
+                            } text-white`}
+                    >
+                        {isInitializing ? (
+                            <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                Initializing...
+                            </>
+                        ) : (
+                            'Start Onboarding Flow'
+                        )}
+                    </button>
+                </div>
+            ) : ''}
+
             {/* Text Fallback */}
-            {!isComplete && isSupported == false ? (
+            {showTextFallback ? (
                 <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
                     <div className="flex items-center gap-2 mb-3">
                         <AlertCircle size={20} className="text-yellow-600" />
@@ -371,7 +445,7 @@ export const AiOnboardingForm = () => {
                                 handleTextReceived(ConversationSpeaker.USER, ConversationInput.TEXT, textInput)
                             }}
                             disabled={!textInput.trim() || isProcessing}
-                            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 cursor-pointer disabled:opacity-50"
                         >
                             Send
                         </button>
@@ -397,21 +471,7 @@ export const AiOnboardingForm = () => {
             {/* Conversation History */}
             <div className="mb-6 bg-gray-50 rounded-lg p-4 max-h-64 overflow-y-auto" ref={conversationElementRef}>
                 <h3 className="font-semibold text-gray-800 mb-3">Conversation</h3>
-                {conversation.map((entry, index) => (
-                    <div key={index} className={`mb-2 p-2 rounded ${entry.speaker === ConversationSpeaker.AGENT ? 'bg-blue-100 ml-4' : 'bg-green-100 mr-4'
-                        }`}>
-                        <div className="flex justify-between items-start">
-                            <span className={`font-medium ${entry.speaker === ConversationSpeaker.AGENT ? 'text-blue-800' : 'text-green-800'
-                                }`}>
-                                {entry.speaker === ConversationSpeaker.AGENT ? 'AI Agent' : 'You'}
-                            </span>
-                            <span className="text-xs text-gray-500">
-                                {entry.timestamp.toLocaleTimeString()}
-                            </span>
-                        </div>
-                        <p className="text-gray-700 mt-1">{entry.text}</p>
-                    </div>
-                ))}
+                {conversationElements}
             </div>
 
             {/* Collected Data Preview */}
@@ -462,7 +522,7 @@ export const AiOnboardingForm = () => {
                         </div>
                         <button
                             onClick={downloadReport}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer"
                         >
                             <Download size={16} />
                             Download Report

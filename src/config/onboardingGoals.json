@@ -3,7 +3,7 @@
     "id": "userName",
     "prompt": "Hello! I'm your AI onboarding assistant. I'll help you get set up by having a quick conversation. Let's start - what's your name?",
     "dataField": "userName",
-    "followUp": "Nice to meet you, {userName}!"
+    "followUp": "Nice to meet you {userName}!"
   },
   {
     "id": "companyName",
