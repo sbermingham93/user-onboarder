@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import ONBOARDING_GOALS from '../config/onboardingGoals.json'
 import { AlertCircle, CheckCircle, Download, Mic, MicOff, Volume2 } from 'lucide-react';
-import { CompletionStatus, ConversationInput, ConversationSpeaker, type IConversationEntry, type IOnboardingData, type IOnboardingReport, type IValidationResponse } from '../types/types';
+import { CompletionStatus, ConversationInput, ConversationSpeaker, type IConversationEntry, type IOnboardingData, type IOnboardingGoal, type IOnboardingReport, type IValidationResponse } from '../types/types';
 import { validateCompanyIndustry } from '../api/validation';
+import { useTextToSpeech } from '../hooks/useTextToSpeech';
+import { useLiveTranscription } from '../hooks/useLiveTranscription';
 
 
 // initial thoughts
 // get it working with text inputs first (also will be used if we are having issues with the audio)
 // add the audio, so text can be read, and input taken from the mic of the machine
-
 // ui - top - header, 2. what step they are on, 3. input - which is either a text box, or audio input, 4. chat messages
 
 // afterwards we add ai for each step (again may need to fall back to previous solution if issue with AI api)
@@ -17,10 +18,13 @@ import { validateCompanyIndustry } from '../api/validation';
 
 // make the UI look nicer
 
+
+// KNOWN BUGS
+// first prompt is not being read - not allowed error from the utterance.speak
+// simple text parsing can easily miss the keywords
+
 export const AiOnboardingForm = () => {
     // STATE VARIABLES
-    const [isSpeaking, setIsSpeaking] = useState(false) // speaking
-    const [isListening, setIsListening] = useState(false) // listening for user input
     const [isProcessing, setIsProcessing] = useState(false) // used for api calls, creating report etc
     const [isComplete, setIsComplete] = useState(false) // is the process complete
 
@@ -34,22 +38,22 @@ export const AiOnboardingForm = () => {
     // REFS
     const onboardingDataRef = useRef<IOnboardingData>({})
     const conversationRef = useRef<IConversationEntry[]>([])
+    const conversationElementRef = useRef(null)
 
     // HOOKS
-    useEffect(() => {
-        // add the first step to the conversation
-        if (conversationRef.current.length == 0) {
-            const initialConversation = [{
-                text: ONBOARDING_GOALS[0].prompt,
-                input: ConversationInput.TEXT,
-                speaker: ConversationSpeaker.AGENT,
-                timestamp: new Date()
-            }]
-            conversationRef.current = initialConversation
-            setConversation(initialConversation)
-        }
-    }, [])
+    const { isSpeaking, cancel, isEnabled, speak } = useTextToSpeech()
+    const {
+        isListening,
+        interimTranscript,
+        finalTranscript,
+        error,
+        isSupported,
+        startListening,
+        stopListening
+    } = useLiveTranscription()
 
+
+    // FUNCTIONS
     const addConversationEntry = (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
         setConversation(prev => [...prev, {
             timestamp: date,
@@ -59,7 +63,22 @@ export const AiOnboardingForm = () => {
         }])
     }
 
-    // FUNCTIONS
+    const speakAndAddConversationEntry = async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
+        // add conversation entry
+        addConversationEntry(speaker, inputType, textReceived, date)
+
+        // speak if we can
+        if (speaker == ConversationSpeaker.AGENT) {
+            try {
+                await speak(textReceived)
+            } catch (err) {
+                console.error({
+                    err
+                })
+            }
+        }
+    }
+
     // simple method to pick out data of interest based on the step they are on
     const extractDataFromResponse = (response: string, dataField: string): Partial<IOnboardingData> => {
         const data: any = {};
@@ -73,11 +92,11 @@ export const AiOnboardingForm = () => {
 
             case 'companyName':
                 // Clean up company response
-                data.companyName = response.replace(/^(i work for|i work at|at)\s+/i, '').trim();
+                data.companyName = response.replace(/^(i work for|i work at|at|i work in|for|in)\s+/i, '').trim();
                 break;
 
             case 'role':
-                data.role = response.replace(/^(i am|i'm|my role is|i work as)\s+/i, '').trim();
+                data.role = response.replace(/^(i am|i'm|i am a|i'm a|my role is|i work as|a)\s+/i, '').trim();
                 break;
 
             case 'objective':
@@ -96,74 +115,81 @@ export const AiOnboardingForm = () => {
         return data;
     };
 
+    const performIndustryCheckIfNeeded = async (stepMeta: IOnboardingGoal) => {
+        if (stepMeta != null && stepMeta.id === 'industry' && onboardingDataRef.current.companyName) {
+            try {
+                setIsProcessing(true)
+                const validation = await validateCompanyIndustry(onboardingDataRef.current.companyName);
+                setValidationResult(validation);
+
+                const validationMessage = validation.industryMatch
+                    ? "Great! I've confirmed that your company is in the food and beverage industry."
+                    : "I see. While your company isn't primarily in food and beverage, we can still help you with your research needs.";
+
+                addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, validationMessage, new Date())
+            } catch (err) {
+                console.warn('Validation failed, but continuing with onboarding.');
+            } finally {
+                setIsProcessing(false)
+            }
+        }
+    }
+
     // todo - make this method less horrible
     const handleTextReceived = async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string) => {
         // add a row to the conversation
         addConversationEntry(speaker, inputType, textReceived, new Date())
 
+        // nothing more to do if its the agent
+        if (speaker == ConversationSpeaker.AGENT) {
+            return
+        }
+
         const stepMeta = ONBOARDING_GOALS[currentStep]
 
+        // we want to extract any information of interest here
+        const extracted = extractDataFromResponse(textReceived, stepMeta.dataField)
+        const newOnboardingData = { ...onboardingDataRef.current, ...extracted }
+
+        onboardingDataRef.current = newOnboardingData
+        setOnboardingData(newOnboardingData)
+
         // empty the text input
-        if (inputType == ConversationInput.TEXT && speaker == ConversationSpeaker.USER) {
-            // we want to extract any information of interest here
-            const extracted = extractDataFromResponse(textInput, stepMeta.dataField)
-            const newOnboardingData = { ...onboardingDataRef.current, ...extracted }
-
-            onboardingDataRef.current = newOnboardingData
-            setOnboardingData(newOnboardingData)
-
+        if (inputType == ConversationInput.TEXT) {
             setTextInput("")
         }
 
-        if (speaker == ConversationSpeaker.USER) {
-            // get the follow up, show it, onto the next step
-            const followUp = ONBOARDING_GOALS[currentStep].followUp.replace(/\{(\w+)\}/g, (match, key) => {
+        // get the follow up, show it, onto the next step
+        const followUp = ONBOARDING_GOALS[currentStep].followUp.replace(/\{(\w+)\}/g, (match, key) => {
+            return (onboardingDataRef.current as any)[key] || match;
+        });
+
+        await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, followUp, new Date())
+
+        // if we are not on the last step, increment
+        const nextStep = currentStep + 1
+        const isFinalStep = nextStep >= ONBOARDING_GOALS.length
+
+        if (isFinalStep == true) {
+            completeOnboarding()
+        } else {
+            // ADD CHECK ON COMPANY NAME
+            await performIndustryCheckIfNeeded(stepMeta)
+
+            // increment the step, show the prompt
+            setCurrentStep(nextStep)
+            const prompt = ONBOARDING_GOALS[nextStep].prompt.replace(/\{(\w+)\}/g, (match, key) => {
                 return (onboardingDataRef.current as any)[key] || match;
             });
 
-            addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, followUp, new Date())
-
-            // if we are not on the last step, increment
-            const nextStep = currentStep + 1
-
-            if (nextStep >= ONBOARDING_GOALS.length) {
-                completeOnboarding()
-            } else {
-                // ADD CHECK ON COMPANY NAME
-                if (stepMeta != null && stepMeta.id === 'industry' && onboardingDataRef.current.companyName) {
-                    try {
-                        setIsProcessing(true)
-                        const validation = await validateCompanyIndustry(onboardingDataRef.current.companyName);
-                        setValidationResult(validation);
-
-                        const validationMessage = validation.industryMatch
-                            ? "Great! I've confirmed that your company is in the food and beverage industry."
-                            : "I see. While your company isn't primarily in food and beverage, we can still help you with your research needs.";
-
-                        addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, validationMessage, new Date())
-                    } catch (err) {
-                        console.warn('Validation failed, but continuing with onboarding.');
-                    } finally {
-                        setIsProcessing(false)
-                    }
-                }
-
-
-                setCurrentStep(nextStep)
-                const prompt = ONBOARDING_GOALS[nextStep].prompt.replace(/\{(\w+)\}/g, (match, key) => {
-                    return (onboardingDataRef.current as any)[key] || match;
-                });
-
-                // add the prompt too
-                addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, prompt, new Date())
-            }
-        } else {
-            // it was the agent, will be waiting for the users input
+            // add the prompt too
+            await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, prompt, new Date())
         }
+
     }
 
     // Complete the onboarding process - create report, add message
-    const completeOnboarding = () => {
+    const completeOnboarding = async () => {
         setIsComplete(true);
 
         const finalReport: IOnboardingReport = {
@@ -181,7 +207,8 @@ export const AiOnboardingForm = () => {
 
         const completionMessage = `Perfect! I've generated your onboarding report. You can review all the information we discussed and download it for your records. Thank you for completing the onboarding process, ${onboardingData?.userName}!`;
 
-        addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, completionMessage, new Date());
+        // addConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, completionMessage, new Date());
+        await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, completionMessage, new Date())
     };
 
     const downloadReport = () => {
@@ -197,6 +224,60 @@ export const AiOnboardingForm = () => {
         linkElement.setAttribute('download', exportFileDefaultName);
         linkElement.click();
     };
+
+    // when we get text from the mic, we process it
+    const previousInterimResultRef = useRef<string>(undefined)
+
+    useEffect(() => {
+        if (interimTranscript == null || interimTranscript.length == 0) {
+            if (previousInterimResultRef.current != null && previousInterimResultRef.current.length > 0) {
+                handleTextReceived(ConversationSpeaker.USER, ConversationInput.AUDIO, previousInterimResultRef.current)
+                previousInterimResultRef.current = ""
+
+                // stop listening too
+                stopListening()
+            }
+        } else {
+            previousInterimResultRef.current = interimTranscript
+        }
+    }, [interimTranscript])
+
+    // kick off the process with adding the first prompt
+    useEffect(() => {
+        async function speakFirstMessage() {
+            const prompt = ONBOARDING_GOALS[0].prompt
+
+            const initialConversation = [{
+                text: prompt,
+                input: ConversationInput.TEXT,
+                speaker: ConversationSpeaker.AGENT,
+                timestamp: new Date()
+            }]
+            conversationRef.current = initialConversation
+            setConversation(initialConversation)
+
+            try {
+                await speak(prompt)
+            } catch (err) {
+                console.warn('Issue with first message')
+            }
+        }
+
+        // add the first step to the conversation
+        if (conversationRef.current.length == 0) {
+            speakFirstMessage()
+        }
+    }, [])
+
+    // when conversation items are added, scroll to the bottom of the list
+    useEffect(() => {
+        if (conversationElementRef.current) {
+            conversationElementRef.current.scrollTo({
+                top: conversationElementRef.current.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
+    }, [conversation]);
 
     // UI
     return (
@@ -249,24 +330,24 @@ export const AiOnboardingForm = () => {
             </div>
 
             {/* Voice Controls */}
-            {/* {!isComplete && !showTextFallback && (
-        <div className="flex justify-center gap-4 mb-6">
-          <button
-            onClick={isListening ? stopListening : startListening}
-            disabled={isSpeaking || isProcessing}
-            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${isListening
-                ? 'bg-red-500 text-white hover:bg-red-600'
-                : 'bg-green-500 text-white hover:bg-green-600'
-              } ${(isSpeaking || isProcessing) ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {isListening ? <MicOff size={20} /> : <Mic size={20} />}
-            {isListening ? 'Stop Recording' : 'Start Recording'}
-          </button>
-        </div>
-      )} */}
+            {!isComplete && isSupported == true ? (
+                <div className="flex justify-center gap-4 mb-6">
+                    <button
+                        onClick={isListening ? stopListening : startListening}
+                        disabled={isSpeaking || isProcessing}
+                        className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${isListening
+                            ? 'bg-red-500 text-white hover:bg-red-600'
+                            : 'bg-green-500 text-white hover:bg-green-600'
+                            } ${(isSpeaking || isProcessing) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        {isListening ? <MicOff size={20} /> : <Mic size={20} />}
+                        {isListening ? 'Stop Recording' : 'Start Recording'}
+                    </button>
+                </div>
+            ) : ''}
 
             {/* Text Fallback */}
-            {!isComplete && (
+            {!isComplete && isSupported == false ? (
                 <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
                     <div className="flex items-center gap-2 mb-3">
                         <AlertCircle size={20} className="text-yellow-600" />
@@ -296,18 +377,25 @@ export const AiOnboardingForm = () => {
                         </button>
                     </div>
                 </div>
-            )}
+            ) : ''}
 
             {/* Live Transcript */}
-            {/* {currentTranscript && (
-        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-          <h4 className="font-medium text-gray-700 mb-1">Live Transcript:</h4>
-          <p className="text-gray-600 italic">{currentTranscript}</p>
-        </div>
-      )} */}
+            {interimTranscript && (
+                <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <h4 className="font-medium text-gray-700 mb-1">Live Transcript:</h4>
+                    <p className="text-gray-600 italic">{interimTranscript}</p>
+                </div>
+            )}
+
+            {finalTranscript && (
+                <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                    <h4 className="font-medium text-gray-700 mb-1">Final Transcript:</h4>
+                    <p className="text-gray-600 italic">{finalTranscript}</p>
+                </div>
+            )}
 
             {/* Conversation History */}
-            <div className="mb-6 bg-gray-50 rounded-lg p-4 max-h-64 overflow-y-auto">
+            <div className="mb-6 bg-gray-50 rounded-lg p-4 max-h-64 overflow-y-auto" ref={conversationElementRef}>
                 <h3 className="font-semibold text-gray-800 mb-3">Conversation</h3>
                 {conversation.map((entry, index) => (
                     <div key={index} className={`mb-2 p-2 rounded ${entry.speaker === ConversationSpeaker.AGENT ? 'bg-blue-100 ml-4' : 'bg-green-100 mr-4'
