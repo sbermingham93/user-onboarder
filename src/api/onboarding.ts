@@ -13,11 +13,11 @@ export interface IAiOnboardingResponse {
 export const callAiService = async (userMessage: string, context: any): Promise<IAiOnboardingResponse> => {
   const prompt = `
 You are an AI onboarding assistant. Your goal is to collect the following information from the user:
-- User's name
-- Company name  
-- Their role/position in the company
-- Their main objective/goal of contacting us
-- Their ideal output 
+- What company do they work for
+- What role do they have in the company
+- What are they hoping to achieve with your research
+- Is their company in the food and beverage industry
+- What would the ideal output look like for them
 
 Current context:
 - Collected data: ${JSON.stringify(context.collectedData)}
@@ -31,10 +31,10 @@ Respond with a JSON object containing:
   "response": "Your conversational response to the user",
   "extractedData": {
     // Any data you extracted from their message 
-    "userName": "extracted name or null",
     "companyName": "extracted company or null", 
     "role": "extracted role or null",
     "objective": "extracted objective if contacting or null",
+    "inFoodAndBeverage": "extracted in food and beverage or null",
     "idealOutput": "extracted ideal output or null"
   },
   "isComplete": boolean // true if you have all required information

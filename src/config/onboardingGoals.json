@@ -1,13 +1,7 @@
 [
   {
-    "id": "userName",
-    "prompt": "Hello! I'm your AI onboarding assistant. I'll help you get set up by having a quick conversation. Let's start - what's your name?",
-    "dataField": "userName",
-    "followUp": "Nice to meet you {userName}!"
-  },
-  {
     "id": "companyName",
-    "prompt": "What company do you work for?",
+    "prompt": "Hello! I'm your AI onboarding assistant. Lets get you set up with a quick conversation. What company do you work for?",
     "dataField": "companyName",
     "followUp": "Great! I'll make a note that you work at {companyName}."
   },
@@ -24,9 +18,9 @@
     "followUp": "That sounds like a valuable goal."
   },
   {
-    "id": "industry",
+    "id": "inFoodAndBeverage",
     "prompt": "Is {companyName} in the food and beverage industry?",
-    "dataField": "industryConfirmed",
+    "dataField": "inFoodAndBeverage",
     "followUp": "Let me validate that information for you."
   },
   {
