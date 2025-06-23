@@ -5,6 +5,17 @@ import { CompletionStatus, ConversationInput, ConversationSpeaker, type IConvers
 import { validateCompanyIndustry } from '../api/validation';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { useLiveTranscription } from '../hooks/useLiveTranscription';
+import { callAiService, type IAiOnboardingResponse } from '../api/onboarding';
+
+const DATA_POINTS = ONBOARDING_GOALS.map((goal) => {
+    return goal.dataField
+})
+
+const EMPTY_ONBOARDING_DATA = DATA_POINTS.reduce((result, item) => {
+    result[item] = undefined
+
+    return result
+}, {})
 
 export const AiOnboardingForm = () => {
     // STATE VARIABLES
@@ -15,7 +26,7 @@ export const AiOnboardingForm = () => {
     const [currentStep, setCurrentStep] = useState(0)
     const [textInput, setTextInput] = useState("") // text input in case issue with audio
     const [conversation, setConversation] = useState<IConversationEntry[]>([])
-    const [onboardingData, setOnboardingData] = useState<IOnboardingData>({}) // object to track the important info
+    const [onboardingData, setOnboardingData] = useState<IOnboardingData>(EMPTY_ONBOARDING_DATA) // object to track the important info
     const [validationResult, setValidationResult] = useState<IValidationResponse>() // response from api
     const [report, setReport] = useState<IOnboardingReport>();
 
@@ -44,12 +55,14 @@ export const AiOnboardingForm = () => {
 
     // FUNCTIONS
     const addConversationEntry = useCallback((speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
-        setConversation(prev => [...prev, {
+        conversationRef.current = [...conversationRef.current, {
             timestamp: date,
             speaker: speaker,
             text: textReceived,
             input: inputType
-        }]);
+        }]
+        
+        setConversation(conversationRef.current);
     }, []);
 
     const speakAndAddConversationEntry = useCallback(async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string, date: Date) => {
@@ -195,8 +208,63 @@ export const AiOnboardingForm = () => {
         }
     }, [currentStep, completeOnboarding, performIndustryCheckIfNeeded, startListening, speakAndAddConversationEntry])
 
+    const processAiResponse = useCallback(async (aiResponse: IAiOnboardingResponse) => {
+        // extract any data from the reponse
+        const nonNullFields = Object.entries(aiResponse.extractedData || {}).reduce((acc, [key, value]) => {
+            if (value !== null && value !== undefined && value.length > 0) {
+                acc[key] = value;
+            }
+            return acc;
+        }, {});
+
+        // process ai response
+        onboardingDataRef.current = {
+            ...onboardingDataRef.current, 
+            ...nonNullFields
+        }
+        setOnboardingData(onboardingDataRef.current)
+
+        // if we are finished, and have all the data points, call on complete
+        if (aiResponse.isComplete == true) {
+            await completeOnboarding()
+        } else {
+            // check if we are onto the next step
+            const calculatedStep = Object.values(onboardingDataRef.current).filter((value) => {
+                return value != null
+            }).length
+
+            setCurrentStep(calculatedStep)
+
+             if (aiResponse.response != null && aiResponse.response.length > 0) {
+                await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.AUDIO, aiResponse.response, new Date())
+
+                // start listening
+                startListening()
+            }
+        }
+    }, [startListening, speakAndAddConversationEntry, completeOnboarding])
+
+    const processAiStep = useCallback(async (textReceived: string) => {
+        // check what fields are still missing
+        const missingFields = DATA_POINTS.filter((field) => {
+            return onboardingDataRef.current[field] == null
+        })
+
+        // prepare context
+        const context = {
+            collectedData: onboardingDataRef.current,
+            missingFields: missingFields,
+            conversationHistory: conversationRef.current,
+            currentFocus: missingFields[0]
+        }
+
+        // try calling the ai endpoint...
+        const aiResponse = await callAiService(textReceived, context)
+
+        await processAiResponse(aiResponse)
+    }, [processAiResponse])
+
     const handleTextReceived = useCallback(async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string) => {
-        // ... your existing logic
         addConversationEntry(speaker, inputType, textReceived, new Date())
 
         // nothing more to do if its the agent
@@ -204,12 +272,20 @@ export const AiOnboardingForm = () => {
             return
         }
 
-        // process current step
-        await processCurrentStep(speaker, inputType, textReceived)
+         // if text empty the input
+        if (inputType == ConversationInput.TEXT) {
+            setTextInput("")
+        }
 
-        // process next step
-        await processNextStep()
-    }, [addConversationEntry, processCurrentStep, processNextStep]);
+        // todo how to handle this gracefully - use ai unless we have a problem...
+        await processAiStep(textReceived)
+
+        // // process current step
+        // await processCurrentStep(speaker, inputType, textReceived)
+
+        // // process next step
+        // await processNextStep()
+    }, [addConversationEntry, processCurrentStep, processNextStep, processAiStep]);
 
     const downloadReport = useCallback(() => {
         if (!report) return;
@@ -323,7 +399,7 @@ export const AiOnboardingForm = () => {
     }, [isComplete, isInitializing, conversation, isSupported])
 
     const showStartButton = useMemo(() => {
-        return conversation.length == 0 || isInitializing == true 
+        return conversation.length == 0 || isInitializing == true
     }, [conversation, isInitializing])
 
     const showTextFallback = useMemo(() => {
@@ -404,8 +480,8 @@ export const AiOnboardingForm = () => {
                         onClick={startOnboarding}
                         disabled={isInitializing}
                         className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all cursor-pointer ${isInitializing
-                                ? 'bg-gray-400 cursor-not-allowed'
-                                : 'bg-green-500 hover:bg-green-600'
+                            ? 'bg-gray-400 cursor-not-allowed'
+                            : 'bg-green-500 hover:bg-green-600'
                             } text-white`}
                     >
                         {isInitializing ? (
@@ -421,7 +497,7 @@ export const AiOnboardingForm = () => {
             ) : ''}
 
             {/* Text Fallback */}
-            {showTextFallback ? (
+            {showTextFallback || true ? (
                 <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
                     <div className="flex items-center gap-2 mb-3">
                         <AlertCircle size={20} className="text-yellow-600" />
