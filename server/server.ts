@@ -1,10 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import OpenAI from 'openai';
-import { OPEN_AI_KEY } from './env/env';
+import { OPEN_AI_KEY } from '../src/env/env';
+import * as fs from 'node:fs';
 
 const openAi = new OpenAI({
   apiKey: OPEN_AI_KEY,
+  dangerouslyAllowBrowser: true
 });
 
 const app = express();
@@ -31,7 +33,7 @@ app.get('/api/validate-industry', async (req, res) => {
     await new Promise(resolve => setTimeout(resolve, 500))
 
     // get the company name from the params
-    const companyName = String(req.query.companyName)
+    const companyName = String(req.query.companyName || "")
       .trim()
       .toLowerCase()
 
@@ -62,7 +64,28 @@ app.get('/api/validate-industry', async (req, res) => {
 });
 
 // endpoint to persist the report
+app.post('/api/onboarding-report', async (req, res) => {
+  try {
+    let jsonBody = JSON.parse(req.body.body);
+    
+    // write to local json file, will be similar in db
+    const reportMeta = {
+      report: jsonBody.report
+    }
+    
+    fs.writeFileSync(`./onboarding.json`, JSON.stringify(reportMeta));
 
+    return res.status(200).send({
+      message: 'Report Persisted'
+    });
+
+  } catch (error) {
+    console.error('Issue persisting the onboarding report:', error);
+    return res.status(500).send(
+      { error: 'Issue persisting the onboarding report' }
+    );
+  }
+})
 
 
 // todo - null checks, input checks, format specified in the api not the app
@@ -84,17 +107,22 @@ app.post('/api/ai-onboarding', async (req, res) => {
           content: prompt
         }
       ],
-      temperature,
-      max_tokens: 500
+      temperature
     });
 
-    console.log({
-      completion,
-      content: completion.choices[0]
-    })
+    if (completion.choices == null || completion.choices.length == 0) {
+      throw new Error("No result from AI.")
+    }
 
     // null check on this
-    const jsonResponse = JSON.parse(completion.choices[0].message.content || "{}")
+    let jsonResponse
+    
+    try {
+      jsonResponse = JSON.parse(completion.choices[0].message.content || "{}")
+    } catch (err) {
+      console.error(`Issue parsing JSON content from AI repsone`)
+      throw err
+    }
 
     return res.status(200).send({
       content: jsonResponse,
@@ -112,3 +140,5 @@ app.post('/api/ai-onboarding', async (req, res) => {
 app.listen(port, () => {
   console.log(`API running at http://localhost:${port}`);
 });
+
+export default app;

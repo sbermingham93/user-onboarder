@@ -20,9 +20,7 @@ npm install
 Create `.env` file with your LLM API key:
 ```bash
 # Add your LLM API key
-VITE_OPENAI_API_KEY=your_key_here
-# or
-VITE_ANTHROPIC_API_KEY=your_key_here
+OPEN_AI_KEY=your_key_here
 
 ```
 

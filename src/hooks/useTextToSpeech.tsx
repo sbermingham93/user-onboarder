@@ -94,15 +94,6 @@ class TextToSpeech implements ITextToSpeech {
                 reject(new Error(errorMessage));
             };
 
-            // Handle cases where speech might be interrupted
-            utterance.onpause = () => {
-                console.log('Speech paused')
-            }
-
-            utterance.onresume = () => {
-                console.log('Speech resumed')
-            }
-
             this.speechSynthesis.speak(utterance);
         });
     }

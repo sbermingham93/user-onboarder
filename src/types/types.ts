@@ -5,6 +5,11 @@ export enum CompletionStatus {
     INCOMPLETE = 'INCOMPLETE'
 }
 
+export enum ConversationResponse {
+    AI='AI',
+    SIMPLE='SIMPLE'
+}
+
 export enum ConversationInput {
     AUDIO = 'AUDIO',
     TEXT = 'TEXT'
@@ -15,15 +20,19 @@ export enum ConversationSpeaker {
     USER = 'USER'
 }
 
+export enum ProcessStage {
+    LANDING = 'landing',
+    QUESTIONS = 'questions',
+    COMPLETE = 'complete'
+}
+
 // INTERFACES
 export interface IOnboardingData {
-  userName?: string;
   companyName?: string;
   role?: string;
   objective?: string;
-  industryConfirmed?: boolean;
+  inFoodAndBeverage?: boolean
   idealOutput?: string;
-  companyOverview?: string;
 }
 
 export interface IConversationEntry {

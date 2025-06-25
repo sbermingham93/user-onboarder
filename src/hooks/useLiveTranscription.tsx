@@ -188,6 +188,8 @@ export const useLiveTranscription = (settings?: ITranscriptionSettings) => {
 
     // Use useCallback to prevent function recreation on every render
     const startListening = useCallback(() => {
+        // empty the error when start listening
+        setError("")
         liveTranscriptionRef.current?.startListening()
     }, [])
 

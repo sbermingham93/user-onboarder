@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { IConversationEntry, IOnboardingReport, IValidationResponse } from '../types/types'
 
 const BASE_URL = "http://localhost:3002"
 
@@ -22,7 +23,8 @@ You are an AI onboarding assistant. Your goal is to collect the following inform
 Current context:
 - Collected data: ${JSON.stringify(context.collectedData)}
 - Missing fields: ${context.missingFields.join(', ')}
-- Conversation history: ${JSON.stringify(context.conversationHistory)} // Last 3 exchanges
+- Conversation history: ${JSON.stringify(context.conversationHistory)} 
+- Current focus: ${context.currentFocus}
 
 User just said: "${userMessage}"
 
@@ -44,19 +46,41 @@ Be conversational, natural.
 Only ask for one piece of information at a time.
 If you have all the pieces of information, respond with a statement, and no question.
 `;
-console.log({
-  prompt
-})
+
     // Replace with your preferred AI service (OpenAI, Anthropic, etc.)
     const response = await axios.post(`${BASE_URL}/api/ai-onboarding`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, temperature: 0.7 })
     });
-
-    console.log({
-      response
-    })
     
     return response.data.content;
+};
+
+
+export const validateCompanyIndustry = async (companyName: string): Promise<IValidationResponse> => {
+    try {
+        const reponse = await axios.get(`${BASE_URL}/api/validate-industry?companyName=${companyName}`)
+
+        return reponse.data
+    } catch (err) {
+        console.warn(`Issue checking for industry match, returning default`)
+        console.warn({
+            error: JSON.stringify(err)
+        })
+        return {
+            industryMatch: false,
+            companyOverview: 'Company overview not found.'
+        }
+    }
+}
+
+export const persistOnboardingData = async (report: IOnboardingReport): Promise<IAiOnboardingResponse> => {
+    const response = await axios.post(`${BASE_URL}/api/onboarding-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report })
+    });
+    
+    return response.data;
 };

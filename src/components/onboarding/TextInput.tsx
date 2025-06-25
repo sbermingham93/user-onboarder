@@ -1,7 +1,4 @@
-import { AlertCircle } from "lucide-react"
-
 interface ITextInput {
-    heading: string
     textInput: string
     onTextInputChange: Function
     onTextInputSubmit: Function
@@ -9,19 +6,15 @@ interface ITextInput {
 }
 
 export const TextInput = ({
-    heading,
     textInput,
     onTextInputChange,
     onTextInputSubmit,
     isDisabled
 }: ITextInput) => {
-    return <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
-        <div className="flex items-center gap-2 mb-3">
-            <AlertCircle size={20} className="text-yellow-600" />
-            <span className="font-medium text-yellow-800">{heading}</span>
-        </div>
+    return <div className="my-2">
         <div className="flex gap-2">
             <input
+                disabled={isDisabled}
                 type="text"
                 value={textInput}
                 onChange={(e) => onTextInputChange(e.target.value)}

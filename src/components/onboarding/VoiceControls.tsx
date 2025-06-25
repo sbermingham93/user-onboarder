@@ -13,7 +13,7 @@ export const VoiceControls = ({
     stopListening,
     startListening
 }: IVoiceControls) => {
-    return <div className="flex justify-center gap-4 mb-6">
+    return <div className="flex justify-center gap-4 my-6">
         <button
             onClick={() => {
                 isListening ? stopListening() : startListening()

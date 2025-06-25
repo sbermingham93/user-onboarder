@@ -21,12 +21,12 @@
     "id": "inFoodAndBeverage",
     "prompt": "Is {companyName} in the food and beverage industry?",
     "dataField": "inFoodAndBeverage",
-    "followUp": "Let me validate that information for you."
+    "followUp": "Ok thank you."
   },
   {
     "id": "idealOutput",
     "prompt": "Finally, what would the ideal output look like for you?",
     "dataField": "idealOutput",
-    "followUp": "Excellent! I have everything I need to generate your onboarding report."
+    "followUp": "Ok, I think we should be able to help you with that."
   }
 ]

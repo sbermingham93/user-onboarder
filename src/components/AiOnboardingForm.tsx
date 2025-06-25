@@ -1,18 +1,19 @@
 import ONBOARDING_GOALS from '../config/onboardingGoals.json'
-import { ConversationInput, ConversationSpeaker } from '../types/types';
+import { ConversationInput, ConversationSpeaker, ProcessStage } from '../types/types';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { useLiveTranscription } from '../hooks/useLiveTranscription';
 import { OnboardingStatusIndicators } from './onboarding/StatusIndicators';
 import { VoiceControls } from './onboarding/VoiceControls';
 import { TextInput } from './onboarding/TextInput';
 import { ProgressBar } from './onboarding/ProgressBar';
-import { PreviewData } from './onboarding/PreviewData';
-import { OnboardingReport } from './onboarding/OnboardingReport';
 import { Header } from './onboarding/Heading';
 import { ConversationDisplay } from './onboarding/ConversationDisplay';
-import { StartOnboarding } from './onboarding/StartOnboarding';
+import LandingStep from './onboarding/LandingStep';
 import { ErrorDisplay } from './onboarding/ErrorDisplay';
 import { useOnboardingFlow } from '../hooks/useOnboardingFlow';
+import { LiveTranscript } from './onboarding/LiveTranscript';
+import CompleteStep from './onboarding/CompleteStep';
+import { useMemo } from 'react';
 
 export const AiOnboardingForm = () => {
     const { isSpeaking, cancel, isEnabled, speak } = useTextToSpeech()
@@ -23,73 +24,76 @@ export const AiOnboardingForm = () => {
         error,
         isSupported,
         startListening,
-        stopListening
+        stopListening,
+        clearTranscript
     } = useLiveTranscription()
+
     const {
-        isComplete,
         currentStep,
-        showProgressPercentage,
         progressPercentage,
         isProcessing,
-        showVoiceControls,
-        showTextFallback,
-        textInput, 
+        textInput,
         setTextInput,
         handleTextReceived,
-        showStartButton,
         startOnboarding,
         conversation,
-        conversationElementRef,
-        isInitializing,
-        onboardingData,
+        updateConversation,
+        processStage,
+        updateProcessingState,
         report,
-        downloadReport
-    } = useOnboardingFlow(startListening, speak, interimTranscript, stopListening, cancel, isSupported)
-    
+        inputMode,
+        responseMode,
+        updateInputMode,
+        updateResponseMode
+    } = useOnboardingFlow(startListening, speak, interimTranscript, stopListening, cancel, isEnabled, finalTranscript)
+
+    const textInputComponent = useMemo(() => {
+        return inputMode == ConversationInput.TEXT || error ? (
+            <TextInput textInput={textInput} onTextInputChange={setTextInput} onTextInputSubmit={(input: string) => {
+                handleTextReceived(ConversationSpeaker.USER, ConversationInput.TEXT, input)
+            }} isDisabled={isProcessing || isListening || isSpeaking} />
+        ) : <></>
+    }, [inputMode, error, textInput, setTextInput, handleTextReceived, isProcessing, isListening, isSpeaking])
 
     // UI
     return (
-        <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
-            <Header message={isComplete ? 'Onboarding Complete!' : `Step ${currentStep + 1} of ${ONBOARDING_GOALS.length}`} />
+        <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg bg-gray-50">
+            <Header header='AI Customer Onboarding Agent' message={processStage == ProcessStage.QUESTIONS ? `Step ${currentStep + 1} of ${ONBOARDING_GOALS.length}` : ''} />
 
-            {/* Progress Bar */}
-            {showProgressPercentage ? <ProgressBar percentage={progressPercentage} /> : ''}
+            {/* Show landing page */}
+            {processStage == ProcessStage.LANDING ? <LandingStep inputMode={inputMode} updateInputMode={updateInputMode} responseMode={responseMode} updateResponseMode={updateResponseMode} startOnboarding={startOnboarding} /> : <></>}
 
-            {/* Status Indicators */}
-            <OnboardingStatusIndicators isListening={isListening} isProcessing={isProcessing} isSpeaking={isSpeaking} />
+            {/* show questions */}
+            {processStage == ProcessStage.QUESTIONS ? <>
+                <ProgressBar percentage={progressPercentage} />
+                <OnboardingStatusIndicators isListening={isListening} isProcessing={isProcessing} isSpeaking={isSpeaking} />
 
-            {/* Voice Controls */}
-            {showVoiceControls ? <VoiceControls isListening={isListening} isDisabled={isProcessing == true || isSpeaking == true} startListening={startListening} stopListening={stopListening} /> : ''}
+                {/* Live Transcript */}
+                {interimTranscript ? <LiveTranscript transcript={interimTranscript} /> : <></>}
 
-            {/* Text Fallback */}
-            {showTextFallback || true ? (
-                <TextInput textInput={textInput} onTextInputChange={setTextInput} onTextInputSubmit={(input: string) => {
-                    handleTextReceived(ConversationSpeaker.USER, ConversationInput.TEXT, input)
-                }} isDisabled={isProcessing} heading='Text Input Mode' />
-            ) : ''}
+                {/* Conversation History */}
+                {conversation.length > 0 ? <ConversationDisplay conversation={conversation} textInput={textInputComponent} /> : <></>}
 
-            {/* Live Transcript */}
-            {interimTranscript ?
-                <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                    <h4 className="font-medium text-gray-700 mb-1">Live Transcript:</h4>
-                    <p className="text-gray-600 italic">{interimTranscript}</p>
-                </div> : ''}
+                {/* Voice Controls */}
+                {inputMode == ConversationInput.AUDIO ? <VoiceControls isListening={isListening} isDisabled={isProcessing == true || isSpeaking == true} startListening={startListening} stopListening={stopListening} /> : <></>}
 
+                {/* Error Display */}
+                {error ? <ErrorDisplay error={error} /> : <></>}
+            </> : ''}
 
-            {/* Start Process */}
-            {showStartButton ? <StartOnboarding startOnboarding={startOnboarding} isInitializing={isInitializing} /> : ''}
+            {/* Show complete */}
+            {processStage == ProcessStage.COMPLETE && report ? <CompleteStep onBackHome={() => {
+                // back to start and empty out the state
+                clearTranscript()
+                updateConversation([])
 
-            {/* Conversation History */}
-            <ConversationDisplay conversation={conversation} ref={conversationElementRef} />
-
-            {/* Collected Data Preview */}
-            <PreviewData data={onboardingData} heading='Data Captured' />
-
-            {/* Completion Report */}
-            {isComplete && report ? <OnboardingReport report={report} downloadReport={downloadReport} /> : ''}
-
-            {/* Error Display */}
-            {error ? <ErrorDisplay error={error} /> : ''}
+                updateProcessingState(
+                    {
+                        stage: ProcessStage.LANDING,
+                        currentStep: 0
+                    }
+                )
+            }} /> : <></>}
         </div>
     );
 }
