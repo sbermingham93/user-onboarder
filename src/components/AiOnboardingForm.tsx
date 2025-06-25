@@ -15,6 +15,7 @@ import { LiveTranscript } from './onboarding/LiveTranscript';
 import CompleteStep from './onboarding/CompleteStep';
 import { useMemo } from 'react';
 
+// todo move to context, use context as needed in each component
 export const AiOnboardingForm = () => {
     const { isSpeaking, cancel, isEnabled, speak } = useTextToSpeech()
     const {
@@ -55,7 +56,7 @@ export const AiOnboardingForm = () => {
         ) : <></>
     }, [inputMode, error, textInput, setTextInput, handleTextReceived, isProcessing, isListening, isSpeaking])
 
-    // UI
+    // UI - todo have stages component which wraps the below staes 
     return (
         <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg bg-gray-50">
             <Header header='AI Customer Onboarding Agent' message={processStage == ProcessStage.QUESTIONS ? `Step ${currentStep + 1} of ${ONBOARDING_GOALS.length}` : ''} />
