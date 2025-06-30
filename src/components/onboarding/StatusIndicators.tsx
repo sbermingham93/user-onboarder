@@ -6,11 +6,11 @@ interface IOnboardingStatusIndicators {
     isProcessing: boolean
 }
 
-export const OnboardingStatusIndicators = ({
+export default function OnboardingStatusIndicators ({
     isSpeaking,
     isListening,
     isProcessing
-}: IOnboardingStatusIndicators) => {
+}: IOnboardingStatusIndicators) {
     return <div className="flex justify-center gap-4 mb-6">
         {isSpeaking ? (
             <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-3 py-2 rounded-lg">

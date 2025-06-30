@@ -2,7 +2,7 @@ interface IProgressBar {
     percentage: number
 }
 
-export const ProgressBar = ({percentage}: IProgressBar) => {
+export default function ProgressBar ({percentage}: IProgressBar) {
     return <div className="mb-6">
         <div className="w-full bg-gray-200 rounded-full h-2">
             <div

@@ -7,12 +7,12 @@ interface IVoiceControls {
     startListening: Function
 }
 
-export const VoiceControls = ({
+export default function VoiceControls ({
     isListening,
     isDisabled,
     stopListening,
     startListening
-}: IVoiceControls) => {
+}: IVoiceControls) {
     return <div className="flex justify-center gap-4 my-6">
         <button
             onClick={() => {

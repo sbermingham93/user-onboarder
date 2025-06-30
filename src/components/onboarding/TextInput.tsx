@@ -5,12 +5,12 @@ interface ITextInput {
     isDisabled: boolean
 }
 
-export const TextInput = ({
+export default function TextInput ({
     textInput,
     onTextInputChange,
     onTextInputSubmit,
     isDisabled
-}: ITextInput) => {
+}: ITextInput) {
     return <div className="my-2">
         <div className="flex gap-2">
             <input

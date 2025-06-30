@@ -118,7 +118,7 @@ class TextToSpeech implements ITextToSpeech {
     }
 }
 
-interface TTSOptions {
+export interface TTSOptions {
     rate?: number;
     pitch?: number;
     voice?: SpeechSynthesisVoice;

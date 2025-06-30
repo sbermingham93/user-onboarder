@@ -1,16 +1,14 @@
-import React from "react";
+import React, { useContext } from "react";
 import { Mic, Keyboard, Bot, List } from "lucide-react";
-import { ConversationInput, ConversationResponse } from "../../types/types";
+import { OnboardingConversationContext } from "../../../context/onboarding/OnboardingConversationContext";
+import { OnboardingFlowContext } from "../../../context/onboarding/OnboardingFlowContext";
+import { ConversationInput, ConversationResponse } from "../../../types/types";
 
-interface ILandingStep {
-    updateInputMode: Function
-    updateResponseMode: Function
-    inputMode: ConversationInput
-    responseMode: ConversationResponse
-    startOnboarding: Function
-}
+export default function LandingStep() {
+    // context
+    const { inputMode, updateInputMode, responseMode, updateResponseMode } = useContext(OnboardingConversationContext)
+    const { startOnboarding } = useContext(OnboardingFlowContext)
 
-export default function LandingStep({ updateInputMode, inputMode, updateResponseMode, responseMode, startOnboarding }: ILandingStep) {
     return (
         <>
             {/* Explainer */}

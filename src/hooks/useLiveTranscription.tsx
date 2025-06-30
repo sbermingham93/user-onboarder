@@ -201,6 +201,7 @@ export const useLiveTranscription = (settings?: ITranscriptionSettings) => {
         liveTranscriptionRef.current?.clearTranscript()
         setInterimTranscript('')
         setFinalTranscript('')
+        setError('')
     }, [])
 
     return useMemo(() => {

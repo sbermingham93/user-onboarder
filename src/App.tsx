@@ -1,12 +1,10 @@
 import React from "react";
-import { AiOnboardingForm } from "./components/AiOnboardingForm";
+import AiOnboarding from "./containers/AiOnboarding";
 
 const App: React.FC = () => {
-
-  
   return (
     <div>
-      <AiOnboardingForm />
+      <AiOnboarding />
     </div>
   );
 };

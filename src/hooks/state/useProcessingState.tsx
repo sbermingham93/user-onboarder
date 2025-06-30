@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { ProcessStage } from "../../types/types";
 
-interface IProcessingState {
+export interface IProcessingState {
     isProcessing: boolean;
     currentStep: number;
     stage: ProcessStage

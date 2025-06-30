@@ -1,29 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { CompletionStatus, ConversationInput, ConversationResponse, ConversationSpeaker, ProcessStage, type IConversationEntry, type IOnboardingReport } from "../types/types";
 import { persistOnboardingData, validateCompanyIndustry } from "../api/api";
 import { callAiService, type IAiOnboardingResponse } from "../api/api";
 import { extractDataFromResponse } from "../utils/utils";
-import { useProcessingState } from "./state/useProcessingState";
-import { useConversationState } from "./state/useConversationState";
 import { ONBOARDING_DATA_POINTS, ONBOARDING_GOALS } from "../config/onboarding";
-import { useDataState } from "./state/useDataState";
+import { TextToSpeechContext } from "../context/onboarding/TextToSpeechContext";
+import { LiveTranscriptionContext } from "../context/onboarding/LiveTranscriptionContext";
+import { OnboardingConversationContext } from "../context/onboarding/OnboardingConversationContext";
+import { OnboardingProcessContext } from "../context/onboarding/OnboardingProcessContext";
 
 // consider looking into xstate for state machine - ready, initialised, listening, speaking, processing (parsing response, calling api, creating report), 
 
-export const useOnboardingFlow = (startListening: Function, speak: Function, interimTranscript: string, stopListening: Function, cancel: Function, isSpeakingEnabled: boolean, finalTranscript: string) => {
-    // State management
-    const processingState = useProcessingState();
-    const conversationState = useConversationState();
-    const dataState = useDataState();
+export const useOnboardingFlow = () => {
+    // parent contexts
+    const { speak, cancel, isEnabled } = useContext(TextToSpeechContext)
+    const { startListening, stopListening, interimTranscript, finalTranscript, clearTranscript } = useContext(LiveTranscriptionContext)
+    const conversationState = useContext(OnboardingConversationContext)
+    const processState = useContext(OnboardingProcessContext)
 
     // Memoized values
     const currentStepMeta = useMemo(() => {
-        return ONBOARDING_GOALS[processingState.currentStep];
-    }, [processingState.currentStep]);
+        return ONBOARDING_GOALS[processState.currentStep];
+    }, [processState.currentStep]);
 
     const progressPercentage = useMemo(() => {
-        return ((processingState.currentStep + 1) / ONBOARDING_GOALS.length) * 100;
-    }, [processingState.currentStep]);
+        return ((processState.currentStep + 1) / ONBOARDING_GOALS.length) * 100;
+    }, [processState.currentStep]);
 
     // Core conversation functions
     const addConversationEntry = useCallback((
@@ -51,26 +53,26 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
     ) => {
         addConversationEntry(speaker, inputType, textReceived, date);
 
-        if (speaker === ConversationSpeaker.AGENT && isSpeakingEnabled == true) {
+        if (speaker === ConversationSpeaker.AGENT && isEnabled == true) {
             await speak(textReceived);
         }
-    }, [addConversationEntry, speak, isSpeakingEnabled]);
+    }, [addConversationEntry, speak, isEnabled]);
 
     const listenIfEnabled = useCallback(() => {
-        if (isSpeakingEnabled && conversationState.inputMode == ConversationInput.AUDIO) {
+        if (isEnabled && conversationState.inputMode == ConversationInput.AUDIO) {
             startListening()
         } else {
             console.warn('Listening is not enabled...')
         }
-    }, [isSpeakingEnabled, startListening, conversationState.inputMode])
+    }, [isEnabled, startListening, conversationState.inputMode])
 
     const processCurrentStep = useCallback(async (speaker: ConversationSpeaker, inputType: ConversationInput, textReceived: string) => {
         // we want to extract any information of interest here
         const extracted = extractDataFromResponse(textReceived, currentStepMeta.dataField)
-        const newOnboardingData = { ...dataState.onboardingDataRef.current, ...extracted }
+        const newOnboardingData = { ...processState.onboardingDataRef.current, ...extracted }
 
-        dataState.onboardingDataRef.current = newOnboardingData
-        dataState.updateOnboardingData(newOnboardingData)
+        processState.onboardingDataRef.current = newOnboardingData
+        processState.updateOnboardingData(newOnboardingData)
 
         // empty the text input
         if (inputType == ConversationInput.TEXT) {
@@ -78,8 +80,8 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
         }
 
         // get the follow up, show it, onto the next step
-        const followUp = ONBOARDING_GOALS[processingState.currentStep].followUp.replace(/\{(\w+)\}/g, (match, key) => {
-            return (dataState.onboardingDataRef.current as any)[key] || match;
+        const followUp = ONBOARDING_GOALS[processState.currentStep].followUp.replace(/\{(\w+)\}/g, (match, key) => {
+            return (processState.onboardingDataRef.current as any)[key] || match;
         });
 
         await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, followUp, new Date())
@@ -87,7 +89,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
 
     // Completion handling
     const completeOnboarding = useCallback(async () => {
-        const companyName = dataState.onboardingDataRef.current.companyName
+        const companyName = processState.onboardingDataRef.current.companyName
 
         // validate the company
         let comapnyValidationResult
@@ -95,7 +97,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
         try {
             if (companyName) {
                 comapnyValidationResult = await validateCompanyIndustry(companyName)
-                dataState.updateValidationResult(comapnyValidationResult)
+                processState.updateValidationResult(comapnyValidationResult)
             }
         } catch (err) { }
 
@@ -103,13 +105,13 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
         const finalReport: IOnboardingReport = {
             id: `onboarding-${Date.now()}`,
             timestamp: new Date(),
-            userData: dataState.onboardingDataRef.current,
+            userData: processState.onboardingDataRef.current,
             transcript: conversationState.conversationRef.current,
             validationResult: comapnyValidationResult,
             completionStatus: CompletionStatus.COMPLETE
         };
 
-        dataState.updateReport(finalReport);
+        processState.updateReport(finalReport);
 
 
         // persist the report
@@ -127,25 +129,25 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
 
         await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, completionMessage, new Date());
 
-        processingState.updateProcessingState({ stage: ProcessStage.COMPLETE });
-    }, [processingState, dataState, conversationState, speakAndAddConversationEntry, finalTranscript]);
+        processState.updateProcessingState({ stage: ProcessStage.COMPLETE });
+    }, [processState, conversationState, speakAndAddConversationEntry, finalTranscript]);
 
     const processNextStep = useCallback(async () => {
         // if we are not on the last step, increment
-        const nextStep = processingState.currentStep + 1
+        const nextStep = processState.currentStep + 1
         const isFinalStep = nextStep >= ONBOARDING_GOALS.length
 
         if (isFinalStep == true) {
             completeOnboarding()
         } else {
             // increment the step
-            processingState.updateProcessingState({
+            processState.updateProcessingState({
                 currentStep: nextStep
             })
 
             // add the prompt too
             const prompt = ONBOARDING_GOALS[nextStep].prompt.replace(/\{(\w+)\}/g, (match, key) => {
-                return (dataState.onboardingDataRef.current as any)[key] || match;
+                return (processState.onboardingDataRef.current as any)[key] || match;
             });
 
             await speakAndAddConversationEntry(ConversationSpeaker.AGENT, ConversationInput.TEXT, prompt, new Date())
@@ -153,7 +155,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
             // listen for next response
             listenIfEnabled()
         }
-    }, [processingState.currentStep, completeOnboarding, listenIfEnabled, speakAndAddConversationEntry])
+    }, [processState.currentStep, completeOnboarding, listenIfEnabled, speakAndAddConversationEntry])
 
     // AI processing
     const processAiResponse = useCallback(async (aiResponse: IAiOnboardingResponse) => {
@@ -165,15 +167,15 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
             return acc;
         }, {});
 
-        const updatedData = { ...dataState.onboardingDataRef.current, ...extractedData };
-        dataState.updateOnboardingData(updatedData);
+        const updatedData = { ...processState.onboardingDataRef.current, ...extractedData };
+        processState.updateOnboardingData(updatedData);
 
         if (aiResponse.isComplete) {
             await completeOnboarding();
         } else {
             // Calculate current step based on collected data
             const collectedFields = Object.values(updatedData).filter(value => value !== null).length;
-            processingState.updateProcessingState({ currentStep: collectedFields });
+            processState.updateProcessingState({ currentStep: collectedFields });
 
             if (aiResponse.response?.length > 0) {
                 await speakAndAddConversationEntry(
@@ -185,23 +187,23 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
                 listenIfEnabled()
             }
         }
-    }, [dataState, processingState, speakAndAddConversationEntry, listenIfEnabled]);
+    }, [processState, speakAndAddConversationEntry, listenIfEnabled]);
 
     const processAiStep = useCallback(async (textReceived: string) => {
         try {
             const missingFields = ONBOARDING_DATA_POINTS.filter(field =>
-                dataState.onboardingDataRef.current[field] === null ||
-                dataState.onboardingDataRef.current[field] === undefined
+                processState.onboardingDataRef.current[field] === null ||
+                processState.onboardingDataRef.current[field] === undefined
             );
 
             const context = {
-                collectedData: dataState.onboardingDataRef.current,
+                collectedData: processState.onboardingDataRef.current,
                 missingFields,
                 conversationHistory: conversationState.conversationRef.current,
                 currentFocus: missingFields[0]
             };
 
-            processingState.updateProcessingState({ isProcessing: true });
+            processState.updateProcessingState({ isProcessing: true });
             const aiResponse = await callAiService(textReceived, context);
             await processAiResponse(aiResponse);
         } catch (err) {
@@ -211,9 +213,9 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
             })
             throw err
         } finally {
-            processingState.updateProcessingState({ isProcessing: false });
+            processState.updateProcessingState({ isProcessing: false });
         }
-    }, [dataState, conversationState, processingState, processAiResponse]);
+    }, [processState, conversationState, processAiResponse]);
 
     const getCurrentStep = useCallback(() => {
         let impliedStep = 0
@@ -221,7 +223,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
         for (let i = 0; i < ONBOARDING_DATA_POINTS.length; i++) {
             const stepMeta = ONBOARDING_DATA_POINTS[i]
 
-            if (dataState.onboardingDataRef.current[stepMeta] === null && dataState.onboardingDataRef.current[stepMeta] === undefined) {
+            if (processState.onboardingDataRef.current[stepMeta] === null && processState.onboardingDataRef.current[stepMeta] === undefined) {
                 return impliedStep
             } else {
                 impliedStep = i
@@ -257,7 +259,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
                 // fallback from any issues
                 // find step based on collected info...
                 const updatedStep = getCurrentStep()
-                processingState.updateProcessingState(
+                processState.updateProcessingState(
                     {
                         currentStep: updatedStep
                     }
@@ -270,7 +272,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
             // process step
             await processSimpleStep(speaker, inputType, textReceived)
         }
-    }, [processAiStep, getCurrentStep, processingState.updateProcessingState, conversationState.responseMode, processSimpleStep])
+    }, [processAiStep, getCurrentStep, processState.updateProcessingState, conversationState.responseMode, processSimpleStep])
 
 
     // Main text processing handler
@@ -294,7 +296,7 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
 
     // Onboarding initialization
     const startOnboarding = useCallback(async () => {
-        processingState.updateProcessingState({ stage: ProcessStage.QUESTIONS });
+        processState.updateProcessingState({ stage: ProcessStage.QUESTIONS });
 
         const firstGoal = ONBOARDING_GOALS[0];
         const prompt = firstGoal.prompt;
@@ -308,12 +310,25 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
 
         conversationState.updateConversation(initialConversation);
 
-        if (isSpeakingEnabled) {
+        if (isEnabled) {
             await speak(prompt);
         }
 
         listenIfEnabled();
-    }, [processingState, conversationState, speak, listenIfEnabled, isSpeakingEnabled]);
+    }, [processState, conversationState, speak, listenIfEnabled, isEnabled]);
+
+    const finishOnboarding = useCallback(() => {
+        // back to start and empty out the state
+        clearTranscript()
+        conversationState.updateConversation([])
+
+        processState.updateProcessingState(
+            {
+                stage: ProcessStage.LANDING,
+                currentStep: 0
+            }
+        )
+    }, [clearTranscript, conversationState.updateConversation, processState.updateProcessingState])
 
     // Audio transcript handling
     const previousInterimResultRef = useRef<string>("");
@@ -340,49 +355,15 @@ export const useOnboardingFlow = (startListening: Function, speak: Function, int
 
     return useMemo(() => {
         return {
-            // processing state
-            currentStep: processingState.currentStep,
-            isProcessing: processingState.isProcessing,
-            processStage: processingState.stage,
-            updateProcessingState: processingState.updateProcessingState,
-
-            // conversation state
-            textInput: conversationState.textInput,
-            setTextInput: conversationState.updateTextInput,
-            conversation: conversationState.conversation,
-            inputMode: conversationState.inputMode,
-            responseMode: conversationState.responseMode,
-            updateInputMode: conversationState.updateInputMode,
-            updateResponseMode: conversationState.updateResponseMode,
-            updateConversation: conversationState.updateConversation,
-
-            // data state
-            onboardingData: dataState.onboardingData,
-            report: dataState.report,
-
             progressPercentage: progressPercentage,
             handleTextReceived: handleTextReceived,
             startOnboarding: startOnboarding,
+            finishOnboarding: finishOnboarding
         }
     }, [
-        processingState.stage,
-        processingState.currentStep,
-        processingState.isProcessing,
-        processingState.updateProcessingState,
-        conversationState.textInput,
-        conversationState.updateTextInput,
-        conversationState.conversation,
-        conversationState.inputMode,
-        conversationState.updateInputMode,
-        conversationState.responseMode,
-        conversationState.updateResponseMode,
-        conversationState.updateConversation,
-
-        dataState.onboardingData,
-        dataState.report,
-
         progressPercentage,
         handleTextReceived,
-        startOnboarding
+        startOnboarding,
+        finishOnboarding
     ])
 }

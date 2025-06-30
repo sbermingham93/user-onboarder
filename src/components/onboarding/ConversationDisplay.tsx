@@ -6,10 +6,10 @@ interface IConversationDisplay {
     textInput: JSX.Element;
 }
 
-export const ConversationDisplay = ({
+export default function ConversationDisplay({
     conversation,
     textInput
-}: IConversationDisplay) => {
+}: IConversationDisplay) {
     // Auto-scroll conversation
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {

@@ -22,7 +22,7 @@ export default function CompleteStep({ onBackHome }: ICompleteStep) {
                     onClick={() => {
                         onBackHome()
                     }}
-                    className="inline-block bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition"
+                    className="inline-block bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition cursor-pointer"
                 >
                     Return Home
                 </button>

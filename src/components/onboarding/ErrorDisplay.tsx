@@ -4,7 +4,7 @@ interface IErrorDisplay {
     error: string
 }
 
-export const ErrorDisplay = ({ error }: IErrorDisplay) => {
+export default function ErrorDisplay({ error }: IErrorDisplay) {
     return <div className="mt-4 p-3 bg-red-50 rounded-lg">
         <div className="flex items-center gap-2">
             <AlertCircle size={16} className="text-red-600" />
